@@ -1,0 +1,6 @@
+{
+  "name": "PTCG Pocket 卡牌交换与收藏追踪器",
+  "description": "专为宝可梦卡牌手游（Pokémon TCG Pocket）打造的卡牌收藏管理与实时交换平台。支持最强基因、梦幻之岛、时空激斗全卡牌追踪、同阶稀有度交换规则、智能双向撮合与好友代码实时交易。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
