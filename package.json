@@ -14,7 +14,8 @@
     "test:http": "node tests/http-smoke.mjs",
     "catalog:seed": "node scripts/seed-catalog.mjs",
     "scanner:setup": "node scripts/setup-scanner-model.mjs",
-    "test:scanner-model": "tsx scripts/scanner-model-smoke.ts"
+    "test:scanner-model": "tsx scripts/scanner-model-smoke.ts",
+    "scanner:check": "tsx scripts/scan-screenshots.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -36,6 +37,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
+    "@napi-rs/canvas": "^1.0.10",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",

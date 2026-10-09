@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeCardRegions, regionBounds } from "../src/utils/cardGeometry";
+import {
+  decodeCardRegions,
+  regionBounds,
+  inferCollectionLayout,
+} from "../src/utils/cardGeometry";
 import {
   calculateDctSimilarity,
   hashRgbPixels96,
@@ -45,6 +49,27 @@ test("detector normalizes equivalent rotated boxes and excludes partial cards", 
     () => decodeCardRegions([], [1, 5, 1], 640, 640),
     /Unsupported/,
   );
+});
+
+test("collection layouts distinguish three/five columns and reject a partial-card false rotation", () => {
+  const partial = output([[227, 640, 38, 50, 0.62, 0.01]]);
+  assert.equal(decodeCardRegions(partial, [1, 6, 1], 1080, 2340).length, 0);
+  const falselyRotated = output([[200, 500, 80, 60, 0.9, 0.01]]);
+  assert.equal(
+    decodeCardRegions(falselyRotated, [1, 6, 1], 640, 640).length,
+    0,
+  );
+  for (const cols of [3, 5] as const) {
+    const regions = Array.from({ length: cols * 2 }, (_, i) => ({
+      centerX: 50 + (i % cols) * 110,
+      centerY: 100 + Math.floor(i / cols) * 160,
+      width: 100,
+      height: 140,
+      angle: 0,
+      confidence: 0.9,
+    }));
+    assert.deepEqual(inferCollectionLayout(regions), { cols, rows: 2 });
+  }
 });
 test("RGB hash rejects incompatible buffers and is deterministic for asymmetric RGB pixels", () => {
   const rgba = new Uint8Array(96 * 96 * 4);

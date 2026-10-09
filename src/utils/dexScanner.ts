@@ -16,7 +16,12 @@ import {
 } from "./perceptualHash";
 import { getCardNameIndex } from "./cardNameMatcher";
 import { scanAuthHeaders } from "./supabase";
-import { cropCardRegion, regionBounds, type CardRegion } from "./cardGeometry";
+import {
+  cropCardRegion,
+  regionBounds,
+  inferCollectionLayout,
+  type CardRegion,
+} from "./cardGeometry";
 
 export interface ScannedCardSlot {
   id: string; // Unique screenshot slot; the card identity is card.id.
@@ -1027,6 +1032,7 @@ export async function processScreenshot(
         ...slot,
         region: undefined as CardRegion | undefined,
       }));
+  const detectedLayout = inferCollectionLayout(regions);
 
   // Step 2: Extract Features & Badges for every slot
   const slotAnalyses = locatedSlots.map((slot) => {
@@ -1552,8 +1558,8 @@ export async function processScreenshot(
     packCode: finalPackCode,
     packName,
     autoDetected: true,
-    detectedCols: grid.cols,
-    detectedRows: grid.rows,
+    detectedCols: detectedLayout?.cols ?? grid.cols,
+    detectedRows: detectedLayout?.rows ?? grid.rows,
     confidence: detectionConfidence,
     tokensUsed: apiTokensUsed,
     durationMs: apiDurationMs,

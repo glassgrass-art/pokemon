@@ -66,6 +66,9 @@ export function decodeCardRegions(
       [w, h] = [h, w];
       angle -= Math.PI / 2;
     }
+    // Collection screenshots contain upright cards. A clipped bottom card can
+    // otherwise be interpreted as a small landscape card rotated by 90 degrees.
+    if (Math.abs(angle) > Math.PI / 4) continue;
     const region = {
       centerX: cx * scale,
       centerY: cy * scale,
@@ -115,4 +118,25 @@ export function cropCardRegion(
   ctx.rotate(-region.angle);
   ctx.drawImage(source, -region.centerX, -region.centerY);
   return crop;
+}
+
+export function inferCollectionLayout(
+  regions: readonly CardRegion[],
+): { cols: 3 | 5; rows: number } | null {
+  const rowGroups: CardRegion[][] = [];
+  for (const region of [...regions].sort((a, b) => a.centerY - b.centerY)) {
+    const row = rowGroups.find(
+      (group) =>
+        Math.abs(group[0].centerY - region.centerY) <
+        Math.min(group[0].height, region.height) * 0.3,
+    );
+    if (row) row.push(region);
+    else rowGroups.push([region]);
+  }
+  const votes = { 3: 0, 5: 0 };
+  for (const group of rowGroups)
+    if (group.length === 3 || group.length === 5)
+      votes[group.length as 3 | 5]++;
+  if (!votes[3] && !votes[5]) return null;
+  return { cols: votes[5] > votes[3] ? 5 : 3, rows: rowGroups.length };
 }
