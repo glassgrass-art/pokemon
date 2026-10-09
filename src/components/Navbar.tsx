@@ -136,19 +136,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="whitespace-nowrap">{t('tabMarket')}</span>
           </button>
 
-          <button
-            id="nav-tab-mart"
-            type="button"
-            onClick={() => setActiveTab('mart')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'mart'
-                ? 'bg-amber-400 text-slate-950 shadow-md shadow-amber-400/25'
-                : 'text-amber-300 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
-            <span className="whitespace-nowrap">{t('tabMart')}</span>
-          </button>
         </nav>
 
         {/* Right Tools: Daily Check-In & Language Selector & Cloud Sync & Coffee & My Trades & Profile */}
@@ -289,7 +276,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             title={t('profile')}
           >
             <img
-              src={trainerProfile.avatar}
+              src={trainerProfile.avatar || "/pokeball-avatar.jpg"}
               alt={trainerProfile.name}
               className="w-7 h-7 rounded-lg object-cover bg-slate-800"
             />
@@ -298,7 +285,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Mobile Bottom Navigation Bar - Exactly 5 fixed tabs, perfectly spaced without scrolling */}
-      <div className="md:hidden border-t border-slate-800 bg-slate-950/95 backdrop-blur-md px-1 py-1 grid grid-cols-5 items-center">
+      <div className="md:hidden border-t border-slate-800 bg-slate-950/95 backdrop-blur-md px-1 py-1 grid grid-cols-2 items-center">
         <button
           type="button"
           onClick={() => setActiveTab('collection')}
@@ -321,16 +308,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           <span className="truncate max-w-full">{t('tabMarket')}</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('mart')}
-          className={`flex flex-col items-center py-1 px-0.5 text-[10px] sm:text-[11px] font-bold transition-colors cursor-pointer ${
-            activeTab === 'mart' ? 'text-amber-400' : 'text-slate-400 hover:text-slate-300'
-          }`}
-        >
-          <ShoppingBag className="w-4 h-4 mb-0.5 shrink-0" />
-          <span className="truncate max-w-full">{t('tabMart')}</span>
-        </button>
 
         {onOpenRating && (
           <button

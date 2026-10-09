@@ -91,6 +91,9 @@ export interface UserCardStatus {
 }
 
 export interface TradeListing {
+  ownerId?: string;
+  offerQuantities?: Record<string, number>;
+  publishState?: 'publishing' | 'published' | 'failed';
   id: string;
   trainerName: string;
   trainerAvatar: string;
@@ -108,6 +111,12 @@ export interface TradeListing {
 }
 
 export interface TradeProposal {
+  fromUserId?: string;
+  toUserId?: string;
+  fromConfirmedAt?: string | null;
+  toConfirmedAt?: string | null;
+  hasFlair?: boolean;
+  hasGoldFrame?: boolean;
   id: string;
   listingId?: string;
   fromTrainerName: string;

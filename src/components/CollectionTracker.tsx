@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, lazy } from 'react';
 import { PokemonCard, UserCardStatus, PackExpansion, Rarity, EnergyType, TrainerCategory, TrainerProfile } from '../types';
 import {
   CARDS_DATABASE,
@@ -33,7 +33,7 @@ import {
   Crown,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-import { CollectionRatingModal } from './CollectionRatingModal';
+const CollectionRatingModal=lazy(()=>import('./CollectionRatingModal').then(m=>({default:m.CollectionRatingModal})));
 import { calculateCollectionRating } from '../utils/collectionRating';
 
 interface CollectionTrackerProps {
@@ -45,7 +45,6 @@ interface CollectionTrackerProps {
   onExportImport?: () => void;
   onOpenScanner?: () => void;
   onOpenCloudSync?: () => void;
-  onResetDemo: () => void;
   initialPackFilter?: string;
   trainerProfile?: TrainerProfile;
   onOpenRating?: () => void;
@@ -60,7 +59,6 @@ export const CollectionTracker: React.FC<CollectionTrackerProps> = ({
   onExportImport,
   onOpenScanner,
   onOpenCloudSync,
-  onResetDemo,
   initialPackFilter,
   trainerProfile,
   onOpenRating,
@@ -341,13 +339,6 @@ export const CollectionTracker: React.FC<CollectionTrackerProps> = ({
               </span>
             </button>
 
-            <button
-              onClick={onResetDemo}
-              className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-xs transition-colors"
-              title="Reset Demo Data"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-            </button>
           </div>
         </div>
 

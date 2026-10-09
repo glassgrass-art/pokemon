@@ -1,4 +1,6 @@
 import { PokemonCard, SupportedLanguage } from '../types';
+import rules from '../data/tradeRulesConfig.json';
+export const TRADEABLE_RARITIES = rules.allowedRarities as PokemonCard['rarity'][];
 
 /**
  * PTCG Pocket Official Trading Rules:
@@ -29,8 +31,8 @@ export function isCardTradeable(card: PokemonCard | undefined | null): boolean {
   if (card.rarity === '3S') {
     return false;
   }
-  // Crown (CR), 1D-4D, 1S-2S, 1RS-2RS are all tradeable
-  return true;
+  // Unknown eligibility stays disabled until reviewed against the in-game detailed trade list.
+  return rules.allowedRarities.includes(card.rarity);
 }
 
 export function getCardTradeRestrictionReason(
@@ -38,6 +40,9 @@ export function getCardTradeRestrictionReason(
   lang: SupportedLanguage = 'zh-Hant'
 ): string | null {
   if (!card) return null;
+  if (rules.pendingVerification.includes(card.rarity)) return lang==='zh-Hant'
+    ? '此稀有度尚未核实当前交换资格，暂不开放挂单；请在游戏内详细交换清单中核对。'
+    : 'Eligibility for this rarity has not been verified. Listings are paused; check the in-game detailed trade list.';
 
   const isPromo =
     card.expansionCode === 'P-A' ||
@@ -112,6 +117,7 @@ export function getTradeRestrictionReason(
 ): { title: string; description: string } | null {
   const desc = getCardTradeRestrictionReason(card, lang);
   if (!desc) return null;
+  if (card && rules.pendingVerification.includes(card.rarity)) return {title:lang==='zh-Hant'?'交换资格待核实':'Trade eligibility pending verification',description:desc};
 
   const isThreeStar = card?.rarity === '3S';
   let title = '特典卡不可交換';

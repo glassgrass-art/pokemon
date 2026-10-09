@@ -20,10 +20,12 @@ import {
   Globe2,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-import { isCardTradeable } from '../utils/tradeRules';
+import { isCardTradeable, TRADEABLE_RARITIES } from '../utils/tradeRules';
 import { RarityBadge } from './RarityBadge';
 
 interface TradeMarketProps {
+  cardFilter?: string;
+  onClearCardFilter?: () => void;
   listings: TradeListing[];
   userCollection: Record<string, UserCardStatus>;
   onOpenCreateModal: () => void;
@@ -35,9 +37,11 @@ interface TradeMarketProps {
   onOpenCloudSync?: () => void;
 }
 
-const MARKET_RARITIES: Rarity[] = ['1D', '2D', '3D', '4D', '1S', '2S', '1RS', '2RS', 'CR'];
+const MARKET_RARITIES = TRADEABLE_RARITIES;
 
 export const TradeMarket: React.FC<TradeMarketProps> = ({
+  cardFilter,
+  onClearCardFilter,
   listings,
   userCollection,
   onOpenCreateModal,
@@ -117,6 +121,8 @@ export const TradeMarket: React.FC<TradeMarketProps> = ({
   // Filter listings
   const filteredListings = useMemo(() => {
     return listings.filter((item) => {
+      if (item.status !== 'active' || item.publishState !== 'published') return false;
+      if (cardFilter && !(item.offerCardIds || [item.offerCardId]).includes(cardFilter)) return false;
       const { offerCards, wantCards, listingRarity } = getListingCards(item);
       if (offerCards.length === 0 || wantCards.length === 0) return false;
 
@@ -157,10 +163,14 @@ export const TradeMarket: React.FC<TradeMarketProps> = ({
 
       return true;
     });
-  }, [listings, selectedRarity, filterType, searchQuery, userCollection, currentLanguage]);
+  }, [listings, selectedRarity, filterType, searchQuery, userCollection, currentLanguage, cardFilter]);
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {cardFilter && <div className="flex items-center justify-between p-3 bg-sky-950/40 rounded-xl text-sm text-sky-200">
+        <span>{getCardName(CARD_MAP.get(cardFilter)!)} · {currentLanguage==='zh-Hant'?'可提供此卡的挂单':'Listings offering this card'}</span>
+        <button onClick={onClearCardFilter}>{currentLanguage==='zh-Hant'?'清除筛选':'Clear filter'}</button>
+      </div>}
       {/* Top Header & Action Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900/90 to-slate-950 border border-slate-800 shadow-xl">
         <div className="space-y-1">
@@ -207,14 +217,14 @@ export const TradeMarket: React.FC<TradeMarketProps> = ({
           <div className="flex items-center gap-2">
             <Globe2 className="w-4 h-4 text-amber-400 shrink-0" />
             <span>
-              已接入 Supabase！首次启用全网卡牌交换挂单，请在云端同步中运行最新 SQL 一键开启 <b>trade_listings</b> 公共池。
+              {currentLanguage==='zh-Hant'?'交换大厅暂时无法连接，请稍后刷新。你的收藏仍保存在此浏览器。':'Trading is temporarily unavailable. Please refresh later. Your collection is still saved in this browser.'}
             </span>
           </div>
           <button
             onClick={onOpenCloudSync}
             className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shrink-0 transition-colors"
           >
-            去开启卡牌交换
+            {currentLanguage==='zh-Hant'?'备份收藏':'Back up collection'}
           </button>
         </div>
       )}

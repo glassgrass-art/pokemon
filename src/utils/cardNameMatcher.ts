@@ -1,6 +1,10 @@
-import { PokemonCard } from '../types';
-import { CARDS_DATABASE } from '../data/cardsData';
-import { calculateDctSimilarity, PrecomputedHash, getPrecomputedCardHashes } from './perceptualHash';
+import { PokemonCard } from "../types";
+import { CARDS_DATABASE } from "../data/cardsData";
+import {
+  calculateDctSimilarity,
+  PrecomputedHash,
+  getPrecomputedCardHashes,
+} from "./perceptualHash";
 
 /**
  * Multi-Language Card Name Matcher & Two-Step Identification Engine
@@ -24,14 +28,14 @@ export interface SpeciesEntry {
 
 // Normalize strings across Traditional Chinese, English, and Japanese
 export function normalizeCardName(str?: string): string {
-  if (!str) return '';
+  if (!str) return "";
   return str
     .toLowerCase()
-    .replace(/[\s\-_'’·()（）「」【】]/g, '')
-    .replace(/ex$/i, '')
-    .replace(/^mega/i, '')
-    .replace(/^超級/, '')
-    .replace(/^超级/, '')
+    .replace(/[\s\-_'’·()（）「」【】]/g, "")
+    .replace(/ex$/i, "")
+    .replace(/^mega/i, "")
+    .replace(/^超級/, "")
+    .replace(/^超级/, "")
     .trim();
 }
 
@@ -48,18 +52,21 @@ class CardNameIndex {
     const speciesMap = new Map<string, SpeciesEntry>();
 
     for (const card of CARDS_DATABASE) {
-      const isEx = !!card.isEx || /ex\b/i.test(card.nameEn || '') || /ex\b/i.test(card.nameCn || '');
-      const rawTw = card.names?.['zh-Hant'] || card.nameCn || '';
-      const rawEn = card.names?.en || card.nameEn || '';
-      const rawJa = card.names?.ja || '';
-      const rawKo = card.names?.ko || '';
+      const isEx =
+        !!card.isEx ||
+        /ex\b/i.test(card.nameEn || "") ||
+        /ex\b/i.test(card.nameCn || "");
+      const rawTw = card.names?.["zh-Hant"] || card.nameCn || "";
+      const rawEn = card.names?.en || card.nameEn || "";
+      const rawJa = card.names?.ja || "";
+      const rawKo = card.names?.ko || "";
 
       const normTw = normalizeCardName(rawTw);
       const normEn = normalizeCardName(rawEn);
       const normJa = normalizeCardName(rawJa);
       const normKo = normalizeCardName(rawKo);
 
-      const speciesKey = `${normEn}_${isEx ? 'ex' : 'normal'}`;
+      const speciesKey = `${normEn}_${isEx ? "ex" : "normal"}`;
 
       if (!speciesMap.has(speciesKey)) {
         speciesMap.set(speciesKey, {
@@ -108,7 +115,7 @@ class CardNameIndex {
       // Register all languages from card.names
       if (card.names) {
         for (const val of Object.values(card.names)) {
-          if (typeof val === 'string') registerTerm(val);
+          if (typeof val === "string") registerTerm(val);
         }
       }
     }
@@ -177,24 +184,22 @@ class CardNameIndex {
       detectedEnergyType?: string;
       isOwned?: boolean;
       expectedIndex?: number;
-    } = {}
+    } = {},
   ): {
-    card: PokemonCard;
+    card: PokemonCard | null;
     similarity: number;
     distance: number;
     confidencePct: number;
-    method: 'two_step_precise' | 'visual_hash' | 'sequential';
+    method: "two_step_precise" | "visual_hash" | "sequential";
   } {
-    // If not owned, preserve sequential silhouette
-    if (options.isOwned === false && options.expectedIndex !== undefined) {
-      const allHashes = getPrecomputedCardHashes();
-      const seq = allHashes[options.expectedIndex] || allHashes[0];
+    // A silhouette carries no artwork identity. Position is not a card number.
+    if (options.isOwned === false && !options.recognizedName) {
       return {
-        card: seq.card,
-        similarity: 0.95,
-        distance: 9,
-        confidencePct: 95,
-        method: 'sequential',
+        card: null,
+        similarity: 0,
+        distance: 192,
+        confidencePct: 0,
+        method: "visual_hash",
       };
     }
 
@@ -205,23 +210,32 @@ class CardNameIndex {
     }
 
     // If pack filter is also specified, check if candidates exist in that pack
-    if (candidates.length > 0 && options.targetPack && options.targetPack !== 'AUTO') {
-      const packFiltered = candidates.filter((c) => c.pack === options.targetPack || c.expansionCode === options.targetPack);
-      if (packFiltered.length > 0) {
-        candidates = packFiltered;
-      }
+    if (
+      candidates.length > 0 &&
+      options.targetPack &&
+      options.targetPack !== "AUTO"
+    ) {
+      const packFiltered = candidates.filter(
+        (c) =>
+          c.pack === options.targetPack ||
+          c.expansionCode === options.targetPack,
+      );
+      candidates = packFiltered;
     }
 
     // Step 2: Perceptual Hash comparison within candidate pool
     if (candidates.length > 0) {
-      let bestCard: PokemonCard = candidates[0];
+      let bestCard: PokemonCard | null = null;
       let highestSimilarity = -1;
       let lowestDiff = 999;
 
       for (const card of candidates) {
         const item = this.cardIdToPrecomputedHashMap.get(card.id);
         if (item) {
-          const { similarity, diffBits } = calculateDctSimilarity(queryHash, item.hashBuf);
+          const { similarity, diffBits } = calculateDctSimilarity(
+            queryHash,
+            item.hashBuf,
+          );
           if (similarity > highestSimilarity) {
             highestSimilarity = similarity;
             lowestDiff = diffBits;
@@ -230,30 +244,41 @@ class CardNameIndex {
         }
       }
 
-      const sim = Math.min(0.99, Math.max(0.85, highestSimilarity));
+      const sim = Math.min(1, Math.max(0, highestSimilarity));
       return {
         card: bestCard,
         similarity: sim,
         distance: lowestDiff,
         confidencePct: Math.round(sim * 100),
-        method: 'two_step_precise',
+        method: "two_step_precise",
       };
     }
 
     // Fallback: full database 2D-DCT hash match if name wasn't recognized
     const allHashes = getPrecomputedCardHashes();
-    let bestHash = allHashes[0];
+    let bestHash: PrecomputedHash | undefined;
     let highestSim = -1;
     let lowestD = 999;
 
     for (let i = 0; i < allHashes.length; i++) {
       const item = allHashes[i];
-      if (options.targetPack && options.targetPack !== 'AUTO' && item.card.pack !== options.targetPack) {
+      if (
+        options.targetPack &&
+        options.targetPack !== "AUTO" &&
+        item.card.pack !== options.targetPack
+      ) {
         continue;
       }
-      const { similarity, diffBits } = calculateDctSimilarity(queryHash, item.hashBuf);
+      const { similarity, diffBits } = calculateDctSimilarity(
+        queryHash,
+        item.hashBuf,
+      );
       let score = similarity;
-      if (options.detectedEnergyType && item.card.type?.toLowerCase() === options.detectedEnergyType.toLowerCase()) {
+      if (
+        options.detectedEnergyType &&
+        item.card.type?.toLowerCase() ===
+          options.detectedEnergyType.toLowerCase()
+      ) {
         score += 0.05;
       }
       if (score > highestSim) {
@@ -263,13 +288,15 @@ class CardNameIndex {
       }
     }
 
-    const sim = Math.min(0.99, Math.max(0.65, highestSim));
+    const sim = bestHash
+      ? calculateDctSimilarity(queryHash, bestHash.hashBuf).similarity
+      : 0;
     return {
-      card: bestHash.card,
+      card: bestHash?.card || null,
       similarity: sim,
       distance: lowestD,
       confidencePct: Math.round(sim * 100),
-      method: 'visual_hash',
+      method: "visual_hash",
     };
   }
 }

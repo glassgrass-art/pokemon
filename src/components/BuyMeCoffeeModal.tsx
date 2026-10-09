@@ -54,7 +54,7 @@ export const BuyMeCoffeeModal: React.FC<BuyMeCoffeeModalProps> = ({
   const [selectedCups, setSelectedCups] = useState<number>(2);
   const [copiedLink, setCopiedLink] = useState(false);
   const [supporterMessage, setSupporterMessage] = useState<string>('');
-  const [supportersList, setSupportersList] = useState<CoffeeSupporter[]>(() => loadCoffeeSupporters());
+  const [supportersList, setSupportersList] = useState<CoffeeSupporter[]>([]);
   const [payMode, setPayMode] = useState<PayMode>('redirect');
   const [hasStartedPayment, setHasStartedPayment] = useState(false);
 
@@ -136,49 +136,9 @@ export const BuyMeCoffeeModal: React.FC<BuyMeCoffeeModalProps> = ({
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
-  // Called when user completes payment and clicks confirmation
-  const handleConfirmAndClaimBadge = () => {
-    // 1. Celebrate with confetti
-    confetti({
-      particleCount: 100,
-      spread: 80,
-      origin: { y: 0.6 },
-      colors: ['#f59e0b', '#fbbf24', '#fcd34d', '#ea580c', '#38bdf8'],
-    });
-
-    // 2. Add to local supporters list
-    const newSupporter: CoffeeSupporter = {
-      id: `sup-${Date.now()}`,
-      name: trainerProfile.name || 'Trainer',
-      avatar: trainerProfile.avatar,
-      cups: selectedCups,
-      amount: currentAmountStr,
-      message:
-        supporterMessage.trim() ||
-        (currentLanguage === 'ja'
-          ? '新パック全コンプ目指します！いつも便利なツールをありがとう！☕'
-          : currentLanguage === 'en'
-          ? 'Love the trading matcher! Good luck getting Crown Charizard! ☕'
-          : '感谢作者维护 PTCG Pocket 交换与图鉴神器！持续支持！☕'),
-      date: Date.now(),
-      badge: currentTierBadge,
-    };
-
-    const updatedList = saveCoffeeSupporter(newSupporter);
-    setSupportersList(updatedList);
-
-    // 3. Update profile with supporter status
-    const updatedProfile: TrainerProfile = {
-      ...trainerProfile,
-      isSupporter: true,
-      supporterBadge: currentTierBadge,
-      supporterCups: (trainerProfile.supporterCups || 0) + selectedCups,
-      supporterSince: trainerProfile.supporterSince || Date.now(),
-    };
-    onUpdateTrainerProfile(updatedProfile);
-
-    showToast(`🎉 感谢你的支持！已点亮专属金色咖啡勋章 (${currentTierBadge})！`, 'success');
-    setActiveTab('supporters');
+  // Self-reported payment cannot grant verified account status.
+  const handleConfirmAndClaimBadge=()=>{
+    showToast(currentLanguage==='zh-Hant'?'请以 Ko-fi 支付收据为准；当前不提供账号勋章自动认证。':'Please check your Ko-fi receipt. Account badge verification is not available.','info');
     setHasStartedPayment(false);
   };
 
@@ -503,10 +463,10 @@ export const BuyMeCoffeeModal: React.FC<BuyMeCoffeeModalProps> = ({
                 <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-slate-900 to-slate-950 border border-emerald-500/30 space-y-2 mt-2">
                   <div className="flex items-center gap-2 text-xs font-bold text-emerald-300">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>支付成功后：全自动点亮勋章并登榜</span>
+                    <span>感谢支持 · 请保留支付收据</span>
                   </div>
                   <p className="text-[11px] text-slate-300 leading-relaxed">
-                    在 Ko-fi 支付成功后，系统将自动感应并为您激活【{currentTierBadge}】金色勋章与感谢墙展示，全程全自动无需额外操作！
+                    支付结果以 Ko-fi 的收据为准。当前账号勋章不作为支付认证；公开赞助会显示在感谢墙。
                   </p>
 
                   {hasStartedPayment && (
@@ -518,7 +478,7 @@ export const BuyMeCoffeeModal: React.FC<BuyMeCoffeeModalProps> = ({
                         onClick={handleConfirmAndClaimBadge}
                         className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
                       >
-                        点击此处手动补发勋章 ➔
+                        查看支付确认说明 ➔
                       </button>
                     </div>
                   )}

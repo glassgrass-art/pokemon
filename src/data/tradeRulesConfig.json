@@ -1,0 +1,8 @@
+{
+  "reviewedAt": "2026-10-08",
+  "source": "https://support.pokemon.com/hc/en-us/articles/34322874608660-Pokemon-TCG-Pocket-Trading-FAQ",
+  "allowedRarities": ["1D", "2D", "3D", "4D", "1S", "2S", "1RS", "2RS"],
+  "blockedRarities": ["3S"],
+  "pendingVerification": ["CR"],
+  "note": "General trade conditions reviewed. Card-specific eligibility must be checked in the in-game Detailed trade list; the site does not guarantee availability."
+}

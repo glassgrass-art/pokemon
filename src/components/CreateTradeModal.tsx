@@ -18,7 +18,7 @@ import {
   Globe2,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-import { isCardTradeable } from '../utils/tradeRules';
+import { isCardTradeable, TRADEABLE_RARITIES } from '../utils/tradeRules';
 import { RarityBadge } from './RarityBadge';
 import { PackExpansionLogo } from './PackExpansionLogo';
 
@@ -30,12 +30,10 @@ interface CreateTradeModalProps {
   userCollection: Record<string, UserCardStatus>;
   trainerProfile: TrainerProfile;
   onClose: () => void;
-  onSubmit: (listing: TradeListing) => void;
+  onSubmit: (listing: TradeListing) => Promise<boolean>;
   zIndex?: number;
 }
 
-// Tradeable rarities in PTCG Pocket (including Crown Rare)
-const TRADEABLE_RARITIES: Rarity[] = ['1D', '2D', '3D', '4D', '1S', '2S', '1RS', '2RS', 'CR'];
 
 export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
   initialOfferCardId,
@@ -76,45 +74,18 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
   });
 
   // Friend code input - strictly 16 digits formatted as 0000-0000-0000-0000
-  const [friendCode, setFriendCode] = useState<string>(() => {
-    let rawCode = (trainerProfile.friendCode || '').replace(/\D/g, '');
-    if (!rawCode) {
-      try {
-        const stored = localStorage.getItem('ptcg_trainer_profile');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          rawCode = (parsed.friendCode || '').replace(/\D/g, '');
-        }
-      } catch (e) {
-        // ignore
-      }
-    }
-    const raw = rawCode.slice(0, 16);
-    const parts: string[] = [];
-    for (let i = 0; i < raw.length; i += 4) {
-      parts.push(raw.slice(i, i + 4));
-    }
-    return parts.join('-');
-  });
-  const [trainerName, setTrainerName] = useState<string>(() => {
-    if (trainerProfile.name && trainerProfile.name !== 'Trainer') return trainerProfile.name;
-    try {
-      const stored = localStorage.getItem('ptcg_trainer_profile');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed.name) return parsed.name;
-      }
-    } catch (e) {
-      // ignore
-    }
-    return trainerProfile.name || 'Trainer';
-  });
+  const [friendCode,setFriendCode]=useState(()=>trainerProfile.friendCode.replace(/\D/g,'').match(/.{1,4}/g)?.join('-') || '');
+  const [trainerName,setTrainerName]=useState(trainerProfile.name || 'Trainer');
   const [note, setNote] = useState<string>('');
+  const [submitting,setSubmitting] = useState(false);
+  const [submitError,setSubmitError] = useState('');
+  const [listingId] = useState(()=>crypto.randomUUID());
+  const [offerQuantities,setOfferQuantities] = useState<Record<string,number>>({});
 
   // Search query for cards
   const [searchQuery, setSearchQuery] = useState('');
   // Filter only owned cards on offer tab
-  const [onlyShowOwnedOffers, setOnlyShowOwnedOffers] = useState(false);
+  const [onlyShowOwnedOffers, setOnlyShowOwnedOffers] = useState(true);
 
   // Expanded state for pack branches
   const [expandedPacks, setExpandedPacks] = useState<Record<string, boolean>>({});
@@ -239,19 +210,25 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
   };
 
   // Form submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (wantCardIds.length === 0 || offerCardIds.length === 0 || !friendCode.trim()) {
+    if (submitting || wantCardIds.length === 0 || offerCardIds.length === 0 || rawDigits.length !== 16) {
       return;
     }
+    const quantities=Object.fromEntries(offerCardIds.map(id=>[id,offerQuantities[id] || 1]));
+    if (offerCardIds.some(id=>!Number.isInteger(quantities[id]) || quantities[id]<1 || quantities[id]>99 || quantities[id]>(userCollection[id]?.count || 0))) {
+      setSubmitError(currentLanguage==='zh-Hant'?'可出数量不能超过图鉴记录，请先补充收藏数量。':'Offer quantities cannot exceed your recorded collection.');return;
+    }
+    setSubmitting(true);setSubmitError('');
 
     const rarityMeta = RARITY_INFO[selectedRarity];
 
     const newListing: TradeListing = {
-      id: `trade-user-${Date.now()}`,
+      id: listingId,
+      offerQuantities: quantities,
       trainerName: trainerName.trim() || trainerProfile.name || 'Trainer',
       trainerAvatar: trainerProfile.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80',
-      friendCode: friendCode.trim(),
+      friendCode: rawDigits,
       offerCardId: offerCardIds[0],
       wantCardId: wantCardIds[0],
       offerCardIds,
@@ -268,19 +245,11 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
       ],
     };
 
-    // Save friend code to trainer profile in localStorage
     try {
-      const stored = localStorage.getItem('ptcg_trainer_profile');
-      const profile = stored ? JSON.parse(stored) : {};
-      profile.friendCode = friendCode.trim();
-      profile.name = trainerName.trim() || profile.name;
-      localStorage.setItem('ptcg_trainer_profile', JSON.stringify(profile));
-    } catch (err) {
-      // Safe fallback
-    }
-
-    onSubmit(newListing);
-    onClose();
+      if (await onSubmit(newListing)) onClose();
+      else setSubmitError(currentLanguage==='zh-Hant'?'发布未成功，请修正提示后重试；未发布的挂单仅对你可见。':'Publication failed. Correct the issue and retry; the draft is private.');
+    } catch {setSubmitError(currentLanguage==='zh-Hant'?'发布失败，请重试。':'Publication failed. Please retry.');}
+    finally {setSubmitting(false);}
   };
 
   const selectedRarityInfo = RARITY_INFO[selectedRarity];
@@ -331,6 +300,11 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
 
         {/* Scrollable Form Body */}
         <form id="create-trade-form" onSubmit={handleSubmit} className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1">
+          {submitError && <p role="alert" className="text-sm text-rose-300">{submitError}</p>}
+          {offerCardIds.length>0 && <div className="p-3 bg-slate-950 rounded-xl text-xs space-y-2">
+            <p>{currentLanguage==='zh-Hant'?'每张卡可出的数量（完成交换后逐张扣减）':'Available copies (decreased after completed trades)'}</p>
+            {offerCardIds.map(id=><label key={id} className="flex items-center justify-between gap-3"><span>{getCardName(CARDS_DATABASE.find(c=>c.id===id)!)}</span><input aria-label={currentLanguage==='zh-Hant'?'可出数量':'Available copies'} type="number" min={1} max={Math.min(99,userCollection[id]?.count || 1)} value={offerQuantities[id] || 1} onChange={e=>setOfferQuantities(prev=>({...prev,[id]:Number(e.target.value)}))} className="w-20 p-2 bg-slate-800 rounded" /></label>)}
+          </div>}
           {/* Step 1: 好友代码与发布信息（置顶显示） */}
           <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/90 border border-slate-800/90 space-y-4 shadow-sm">
             <div className="flex items-center justify-between">
@@ -801,7 +775,7 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
               type="submit"
               form="create-trade-form"
               id="submit-trade-listing-btn"
-              disabled={wantCardIds.length === 0 || offerCardIds.length === 0 || !isFriendCodeComplete}
+              disabled={submitting || wantCardIds.length === 0 || offerCardIds.length === 0 || !isFriendCodeComplete}
               title={
                 !isFriendCodeComplete
                   ? t('fillFriendCodeFirst')
@@ -814,7 +788,7 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
               className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-40 text-slate-950 text-xs font-bold transition-all shadow-md shadow-amber-500/20 flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
             >
               <Check className="w-4 h-4" />
-              {t('submitListingBtn')}
+              {submitting?(currentLanguage==='zh-Hant'?'发布中…':'Publishing…'):t('submitListingBtn')}
             </button>
           </div>
         </div>

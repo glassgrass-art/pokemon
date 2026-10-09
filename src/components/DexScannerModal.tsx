@@ -65,12 +65,14 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
   const [startCardNumber, setStartCardNumber] = useState<number>(1);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [importMode, setImportMode] = useState<'merge' | 'overwrite_pack' | 'overwrite_all'>('merge');
+  const [reviewedImport,setReviewedImport] = useState(false);
 
   // Scanner Execution State
   const [isProcessing, setIsProcessing] = useState(false);
   const [scanResults, setScanResults] = useState<ScanResult[]>([]);
   const [activeResultIndex, setActiveResultIndex] = useState(0);
   const [cardSlots, setCardSlots] = useState<ScannedCardSlot[]>([]);
+  useEffect(()=>setReviewedImport(false),[cardSlots,scanResults,importMode]);
   const [filterType, setFilterType] = useState<'all' | 'owned' | 'unowned' | 'duplicate'>('all');
   const [showScreenshotOverlay, setShowScreenshotOverlay] = useState(true);
   const [previewZoomMode, setPreviewZoomMode] = useState<'standard' | 'expanded' | 'actual'>('expanded');
@@ -1035,6 +1037,7 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
           processScreenshot(file, {
             fileName: file.name,
             targetPack: selectedPack === 'AUTO' ? undefined : selectedPack,
+            startCardIndex: startCardNumber,
             preferredCols,
             matchingMode,
             sensitivity: matchingSensitivity,
@@ -1177,7 +1180,6 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
         if (slot.id === slotId) {
           return {
             ...slot,
-            id: newCard.id,
             card: newCard,
             isModified: true,
             confidence: 1.0,
@@ -1292,8 +1294,12 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
 
   // Commit scanned cards into collection
   const handleConfirmImport = () => {
+    if (!reviewedImport) return;
     const allSlots = scanResults.flatMap((r, idx) => (idx === activeResultIndex ? cardSlots : r.slots));
     const effectivePack = currentResult?.packCode || (selectedPack !== 'AUTO' ? selectedPack : 'A1');
+    if(importMode==='overwrite_pack' && scanResults.some(r=>r.packCode!==effectivePack)) {
+      showToast(currentLanguage==='zh-Hant'?'覆盖模式仅支持同一卡包截图，请改为智慧合并。':'Overwrite mode requires screenshots from the same set. Use smart merge.','error');return;
+    }
 
     const updated = applyScanResultsToCollection(userCollection, allSlots, importMode, effectivePack);
     onImport(updated);
@@ -1517,6 +1523,12 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
                     </div>
                   )}
 
+                  {!!currentResult?.warnings?.length && (
+                    <div className="p-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-xs text-amber-200 space-y-1" role="status">
+                      <p>{currentLanguage === 'zh-Hant' ? '识别需要核对；未识别到的卡牌不会清空原收藏。' : 'Review these results. Unresolved cards will retain their existing counts.'}</p>
+                      {currentResult.warnings.map((warning, index) => <p key={index}>{warning}</p>)}
+                    </div>
+                  )}
                   {/* Results Summary Bar with Auto-Detected Pack Badge */}
                   <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
@@ -1527,7 +1539,7 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
                         </span>
                         {currentResult?.autoDetected && (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40">
-                            Auto-Detected ({Math.round(currentResult.confidence * 100)}%)
+                            {currentLanguage === 'zh-Hant' ? '匹配分数（非准确率）' : 'Match score (not accuracy)'}: {Math.round(currentResult.confidence * 100)}%
                           </span>
                         )}
                       </div>
@@ -2235,6 +2247,18 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
                   </div>
 
                   {/* Step 3: Import Mode & Submit Bar */}
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 space-y-2">
+                    {(()=>{
+                      const all=scanResults.flatMap((r,i)=>i===activeResultIndex?cardSlots:r.slots);
+                      const preview=applyScanResultsToCollection(userCollection,all,importMode,currentResult?.packCode || selectedPack);
+                      const ids=new Set([...Object.keys(userCollection),...Object.keys(preview)]);
+                      const changed=[...ids].filter(id=>(preview[id]?.count || 0)!==(userCollection[id]?.count || 0));
+                      const decreasing=changed.filter(id=>(preview[id]?.count || 0)<(userCollection[id]?.count || 0)).length;
+                      return <p>{currentLanguage==='zh-Hant'?`将变更 ${changed.length} 条卡牌数量，其中 ${decreasing} 条数量减少。`:`Updates ${changed.length} card counts; ${decreasing} counts decrease.`}</p>;
+                    })()}
+                    <p>{currentLanguage==='zh-Hant'?'识别分数不是实测准确率。无法定位的异画卡会被跳过；请逐张核对卡号、卡包和数量，尤其是低分结果。':'Recognition scores are estimates, not measured accuracy. Unresolved variants are skipped. Review card IDs, sets, and quantities, especially low-score results.'}</p>
+                    <label className="flex gap-2"><input type="checkbox" checked={reviewedImport} onChange={e=>setReviewedImport(e.target.checked)} />{currentLanguage==='zh-Hant'?'我已核对全部截图，确认导入结果':'I reviewed all screenshots and approve these import results'}</label>
+                  </div>
                   <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4">
                     <div className="space-y-1">
                       <span className="font-bold text-slate-200">{labels.importModeLabel}</span>
@@ -2257,14 +2281,15 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
                             onChange={() => setImportMode('overwrite_pack')}
                             className="accent-sky-500"
                           />
-                          <span>{labels.overwritePack}</span>
+                          <span>{currentLanguage === 'zh-Hant' ? '替换已识别卡牌数量（保留未识别卡牌）' : 'Replace recognized counts (preserve unseen cards)'}</span>
                         </label>
                       </div>
                     </div>
 
                     <button
                       onClick={handleConfirmImport}
-                      className="py-2.5 px-6 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-black text-xs shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                      disabled={!reviewedImport}
+                      className="py-2.5 px-6 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-black text-xs shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-40"
                     >
                       <Check className="w-4 h-4" />
                       <span>
