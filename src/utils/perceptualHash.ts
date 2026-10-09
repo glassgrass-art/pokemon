@@ -1,10 +1,10 @@
-import { PokemonCard, EnergyType, PackExpansion } from '../types';
-import { CARDS_DATABASE } from '../data/cardsData';
-import cardHashesJson from '../data/cardHashes.json';
+import { PokemonCard, EnergyType, PackExpansion } from "../types";
+import { CARDS_DATABASE } from "../data/cardsData";
+import cardHashesJson from "../data/cardHashes.json";
 
 /**
  * 2D-DCT Perceptual Hashing Engine
- * Grounded in 1vcian/Pokemon-TCGP-Card-Scanner & tcgpocketcollectiontracker.com
+ * Uses the tracker-compatible 96px / 189-bit RGB DCT catalog format.
  *
  * 1. Resizes card thumbnail to 96x96.
  * 2. Computes 2D-DCT (Discrete Cosine Transform) for R, G, and B channels (8x8 low-frequency coefficients).
@@ -115,27 +115,40 @@ function fast2dDct8x8(channelData: Float64Array): Float64Array {
 }
 
 /**
- * Computes 1vcian / tcgpocketcollectiontracker 24-bit RGB 2D-DCT Perceptual Hash
+ * Computes a tracker-compatible 189-bit RGB 2D-DCT perceptual hash.
  */
 export function computeCardDctHash(
   sourceCanvas: HTMLCanvasElement | CanvasRenderingContext2D,
   x = 0,
   y = 0,
   w?: number,
-  h?: number
-): { hashBuf: Uint32Array; isGrayscale: boolean; saturation: number; brightness: number } {
+  h?: number,
+): {
+  hashBuf: Uint32Array;
+  isGrayscale: boolean;
+  saturation: number;
+  brightness: number;
+} {
   const ctx =
     sourceCanvas instanceof CanvasRenderingContext2D
       ? sourceCanvas
-      : sourceCanvas.getContext('2d', { willReadFrequently: true })!;
+      : sourceCanvas.getContext("2d", { willReadFrequently: true })!;
 
-  const sourceW = w ?? (sourceCanvas instanceof CanvasRenderingContext2D ? sourceCanvas.canvas.width : sourceCanvas.width);
-  const sourceH = h ?? (sourceCanvas instanceof CanvasRenderingContext2D ? sourceCanvas.canvas.height : sourceCanvas.height);
+  const sourceW =
+    w ??
+    (sourceCanvas instanceof CanvasRenderingContext2D
+      ? sourceCanvas.canvas.width
+      : sourceCanvas.width);
+  const sourceH =
+    h ??
+    (sourceCanvas instanceof CanvasRenderingContext2D
+      ? sourceCanvas.canvas.height
+      : sourceCanvas.height);
 
-  const canvas96 = document.createElement('canvas');
+  const canvas96 = document.createElement("canvas");
   canvas96.width = 96;
   canvas96.height = 96;
-  const ctx96 = canvas96.getContext('2d', { willReadFrequently: true });
+  const ctx96 = canvas96.getContext("2d", { willReadFrequently: true });
 
   if (!ctx96) {
     return {
@@ -147,9 +160,11 @@ export function computeCardDctHash(
   }
 
   ctx96.imageSmoothingEnabled = true;
-  ctx96.imageSmoothingQuality = 'high';
+  ctx96.imageSmoothingQuality = "high";
   ctx96.drawImage(
-    sourceCanvas instanceof CanvasRenderingContext2D ? sourceCanvas.canvas : sourceCanvas,
+    sourceCanvas instanceof CanvasRenderingContext2D
+      ? sourceCanvas.canvas
+      : sourceCanvas,
     x,
     y,
     sourceW,
@@ -157,10 +172,17 @@ export function computeCardDctHash(
     0,
     0,
     96,
-    96
+    96,
   );
 
-  const imgData = ctx96.getImageData(0, 0, 96, 96).data;
+  return hashRgbPixels96(ctx96.getImageData(0, 0, 96, 96).data);
+}
+
+// Same 96x96 RGB / channel-major 189-bit format as the existing tracker hash catalog.
+// Exposed separately so catalog compatibility can be verified without browser canvas.
+export function hashRgbPixels96(imgData: Uint8Array | Uint8ClampedArray) {
+  if (imgData.length !== 96 * 96 * 4)
+    throw new Error("Expected 96x96 RGBA pixels.");
   const rChannel = new Float64Array(9216);
   const gChannel = new Float64Array(9216);
   const bChannel = new Float64Array(9216);
@@ -227,7 +249,12 @@ export function computeCardDctHash(
  * Calculates Hamming distance similarity between two 24-byte hashes
  * Returns normalized similarity score: 1 - (DiffBits / 189)
  */
-export function calculateDctSimilarity(bufA: Uint32Array, bufB: Uint32Array): { similarity: number; diffBits: number } {
+export function calculateDctSimilarity(
+  bufA: Uint32Array,
+  bufB: Uint32Array,
+): { similarity: number; diffBits: number } {
+  if (bufA.length !== 6 || bufB.length !== 6)
+    throw new Error("Incompatible perceptual hash format.");
   let diffBits = 0;
   const len = Math.min(bufA.length, bufB.length, 6);
 
@@ -248,7 +275,7 @@ export interface MatchResult {
   similarity: number; // 0.0 to 1.0 (e.g. 0.96)
   distance: number; // Hamming distance [0 .. 189]
   confidencePct: number; // percentage e.g. 96%
-  method: 'visual_hash' | 'hybrid' | 'sequential';
+  method: "visual_hash" | "hybrid" | "sequential";
 }
 
 /**
@@ -261,7 +288,7 @@ export function matchCardSlotDct(
     isOwned?: boolean;
     expectedIndex?: number;
     detectedEnergyType?: EnergyType | null;
-  } = {}
+  } = {},
 ): MatchResult {
   const hashList = getPrecomputedCardHashes();
   const packFilter = options.candidatePack;
@@ -270,7 +297,7 @@ export function matchCardSlotDct(
 
   // Filter candidates if a specific pack is selected
   let candidates = hashList;
-  if (packFilter && packFilter !== 'AUTO') {
+  if (packFilter && packFilter !== "AUTO") {
     const filtered = hashList.filter((item) => item.card.pack === packFilter);
     if (filtered.length > 0) {
       candidates = filtered;
@@ -279,14 +306,18 @@ export function matchCardSlotDct(
 
   // If slot is an UNOWNED silhouette, preserve its sequential Pokédex position
   // without falsely matching random dark cards!
-  if (!isOwned && options.expectedIndex !== undefined && options.expectedIndex < candidates.length) {
+  if (
+    !isOwned &&
+    options.expectedIndex !== undefined &&
+    options.expectedIndex < candidates.length
+  ) {
     const seqMatch = candidates[options.expectedIndex] || candidates[0];
     return {
       card: seqMatch.card,
       similarity: 0.95,
       distance: 9,
       confidencePct: 95,
-      method: 'sequential',
+      method: "sequential",
     };
   }
 
@@ -296,7 +327,10 @@ export function matchCardSlotDct(
 
   for (let i = 0; i < candidates.length; i++) {
     const item = candidates[i];
-    const { similarity, diffBits } = calculateDctSimilarity(queryHash, item.hashBuf);
+    const { similarity, diffBits } = calculateDctSimilarity(
+      queryHash,
+      item.hashBuf,
+    );
 
     let score = similarity;
 
@@ -320,7 +354,7 @@ export function matchCardSlotDct(
     similarity: finalSimilarity,
     distance: lowestDiff,
     confidencePct,
-    method: 'visual_hash',
+    method: "visual_hash",
   };
 }
 
@@ -332,7 +366,7 @@ export interface VisualFeatureVector {
   avgB: number;
   saturation: number;
   brightness: number;
-  dominantType: EnergyType | 'trainer';
+  dominantType: EnergyType | "trainer";
   colorRatio: number;
   lumStdDev: number;
 }
@@ -342,12 +376,18 @@ export function computeRgbPerceptualHash(
   x = 0,
   y = 0,
   w?: number,
-  h?: number
+  h?: number,
 ): VisualFeatureVector {
-  const { hashBuf, saturation, brightness } = computeCardDctHash(sourceCanvas, x, y, w, h);
-  let hex = '';
+  const { hashBuf, saturation, brightness } = computeCardDctHash(
+    sourceCanvas,
+    x,
+    y,
+    w,
+    h,
+  );
+  let hex = "";
   for (let i = 0; i < hashBuf.length; i++) {
-    hex += hashBuf[i].toString(16).padStart(8, '0');
+    hex += hashBuf[i].toString(16).padStart(8, "0");
   }
 
   return {
@@ -357,7 +397,7 @@ export function computeRgbPerceptualHash(
     avgB: Math.round(brightness * 255),
     saturation,
     brightness,
-    dominantType: 'colorless',
+    dominantType: "colorless",
     colorRatio: saturation,
     lumStdDev: 30,
   };
@@ -366,12 +406,12 @@ export function computeRgbPerceptualHash(
 export function matchCardSlot(
   features: VisualFeatureVector,
   options: {
-    mode?: 'visual_hash' | 'hybrid' | 'sequential';
+    mode?: "visual_hash" | "hybrid" | "sequential";
     candidatePack?: string;
     expectedIndex?: number;
     detectedEnergyType?: EnergyType | null;
     isOwnedSlot?: boolean;
-  } = {}
+  } = {},
 ): MatchResult {
   const buf = new Uint32Array(6);
   for (let i = 0; i < 6; i++) {
@@ -387,6 +427,9 @@ export function matchCardSlot(
   });
 }
 
-export function calculateHashSimilarity(distance: number, totalBits = 189): number {
+export function calculateHashSimilarity(
+  distance: number,
+  totalBits = 189,
+): number {
   return Math.max(0, Math.min(1, 1 - distance / totalBits));
 }

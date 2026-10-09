@@ -191,6 +191,8 @@ class CardNameIndex {
     distance: number;
     confidencePct: number;
     method: "two_step_precise" | "visual_hash" | "sequential";
+    candidates?: { card: PokemonCard; similarity: number }[];
+    margin?: number;
   } {
     // A silhouette carries no artwork identity. Position is not a card number.
     if (options.isOwned === false && !options.recognizedName) {
@@ -203,100 +205,37 @@ class CardNameIndex {
       };
     }
 
-    // Step 1: Filter by identified Pokémon name
-    let candidates: PokemonCard[] = [];
-    if (options.recognizedName) {
-      candidates = this.findCardsByName(options.recognizedName, options.isEx);
-    }
-
-    // If pack filter is also specified, check if candidates exist in that pack
-    if (
-      candidates.length > 0 &&
-      options.targetPack &&
-      options.targetPack !== "AUTO"
-    ) {
-      const packFiltered = candidates.filter(
-        (c) =>
-          c.pack === options.targetPack ||
-          c.expansionCode === options.targetPack,
-      );
-      candidates = packFiltered;
-    }
-
-    // Step 2: Perceptual Hash comparison within candidate pool
-    if (candidates.length > 0) {
-      let bestCard: PokemonCard | null = null;
-      let highestSimilarity = -1;
-      let lowestDiff = 999;
-
-      for (const card of candidates) {
-        const item = this.cardIdToPrecomputedHashMap.get(card.id);
-        if (item) {
-          const { similarity, diffBits } = calculateDctSimilarity(
-            queryHash,
-            item.hashBuf,
-          );
-          if (similarity > highestSimilarity) {
-            highestSimilarity = similarity;
-            lowestDiff = diffBits;
-            bestCard = card;
-          }
-        }
-      }
-
-      const sim = Math.min(1, Math.max(0, highestSimilarity));
-      return {
-        card: bestCard,
-        similarity: sim,
-        distance: lowestDiff,
-        confidencePct: Math.round(sim * 100),
-        method: "two_step_precise",
-      };
-    }
-
-    // Fallback: full database 2D-DCT hash match if name wasn't recognized
-    const allHashes = getPrecomputedCardHashes();
-    let bestHash: PrecomputedHash | undefined;
-    let highestSim = -1;
-    let lowestD = 999;
-
-    for (let i = 0; i < allHashes.length; i++) {
-      const item = allHashes[i];
-      if (
-        options.targetPack &&
-        options.targetPack !== "AUTO" &&
-        item.card.pack !== options.targetPack
-      ) {
-        continue;
-      }
-      const { similarity, diffBits } = calculateDctSimilarity(
-        queryHash,
-        item.hashBuf,
-      );
-      let score = similarity;
-      if (
-        options.detectedEnergyType &&
-        item.card.type?.toLowerCase() ===
-          options.detectedEnergyType.toLowerCase()
-      ) {
-        score += 0.05;
-      }
-      if (score > highestSim) {
-        highestSim = score;
-        lowestD = diffBits;
-        bestHash = item;
-      }
-    }
-
-    const sim = bestHash
-      ? calculateDctSimilarity(queryHash, bestHash.hashBuf).similarity
-      : 0;
+    const named = options.recognizedName
+      ? this.findCardsByName(options.recognizedName, options.isEx)
+      : [];
+    const namedIds = new Set(named.map((card) => card.id));
+    const ranked = getPrecomputedCardHashes()
+      .filter((item) => !named.length || namedIds.has(item.cardId))
+      .filter(
+        (item) =>
+          !options.targetPack ||
+          options.targetPack === "AUTO" ||
+          item.card.pack === options.targetPack ||
+          item.card.expansionCode === options.targetPack,
+      )
+      .map((item) => ({
+        card: item.card,
+        ...calculateDctSimilarity(queryHash, item.hashBuf),
+      }))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 5);
+    const best = ranked[0];
     return {
-      card: bestHash?.card || null,
-      similarity: sim,
-      distance: lowestD,
-      confidencePct: Math.round(sim * 100),
-      method: "visual_hash",
+      card: best?.card || null,
+      similarity: best?.similarity || 0,
+      distance: best?.diffBits ?? 192,
+      confidencePct: Math.round((best?.similarity || 0) * 100),
+      method: named.length ? "two_step_precise" : "visual_hash",
+      candidates: ranked.map((item) => ({
+        card: item.card,
+        similarity: item.similarity,
+      })),
+      margin: best ? best.similarity - (ranked[1]?.similarity || 0) : 0,
     };
   }
 }

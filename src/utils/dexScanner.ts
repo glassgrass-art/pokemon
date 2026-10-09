@@ -12,9 +12,11 @@ import {
   matchCardSlot,
   calculateHashSimilarity,
   VisualFeatureVector,
+  getPrecomputedCardHashes,
 } from "./perceptualHash";
 import { getCardNameIndex } from "./cardNameMatcher";
 import { scanAuthHeaders } from "./supabase";
+import { cropCardRegion, regionBounds, type CardRegion } from "./cardGeometry";
 
 export interface ScannedCardSlot {
   id: string; // Unique screenshot slot; the card identity is card.id.
@@ -28,6 +30,9 @@ export interface ScannedCardSlot {
   matchMethod?: "two_step_precise" | "visual_hash" | "hybrid" | "sequential";
   hammingDistance?: number;
   visualSimilarity?: number;
+  candidates?: { card: PokemonCard; similarity: number }[];
+  includeInImport?: boolean;
+  needsReview?: boolean;
 }
 
 export interface GridDetectionOptions {
@@ -77,6 +82,7 @@ export interface ScanResult {
   cached?: boolean;
   engine?: string;
   warnings?: string[];
+  localization?: "model" | "grid";
   summary: {
     totalDetected: number;
     ownedCount: number;
@@ -960,9 +966,18 @@ export async function processScreenshot(
     cardScale?: number;
     rowGapScale?: number;
     anchorPoint?: { x: number; y: number };
+    localization?: "auto" | "grid";
   } = {},
 ): Promise<ScanResult> {
   const image = await loadImage(fileOrBlob);
+  if (
+    !(image.naturalWidth || image.width) ||
+    !(image.naturalHeight || image.height) ||
+    (image.naturalWidth || image.width) *
+      (image.naturalHeight || image.height) >
+      16000000
+  )
+    throw new Error("Screenshot must contain at most 16 million pixels.");
 
   const canvas = document.createElement("canvas");
   canvas.width = image.naturalWidth || image.width;
@@ -981,9 +996,40 @@ export async function processScreenshot(
     rowGapScale: options.rowGapScale ?? 1.0,
     anchorPoint: options.anchorPoint,
   });
+  const localizationWarnings: string[] = [];
+  let regions: CardRegion[] = [];
+  if (
+    options.localization !== "grid" &&
+    options.matchingMode !== "sequential" &&
+    options.matchingMode !== "ai"
+  ) {
+    try {
+      const { detectCardRegions } = await import("./cardDetector");
+      regions = await detectCardRegions(canvas);
+      if (!regions.length)
+        localizationWarnings.push(
+          "No complete cards were detected; grid matching was used. Review the crop alignment.",
+        );
+    } catch {
+      localizationWarnings.push(
+        "Automatic card localization is unavailable; grid matching was used. Review the crop alignment.",
+      );
+    }
+  }
+  const locatedSlots = regions.length
+    ? regions.map((region, i) => ({
+        ...regionBounds(region),
+        row: i,
+        col: 0,
+        region,
+      }))
+    : grid.slots.map((slot) => ({
+        ...slot,
+        region: undefined as CardRegion | undefined,
+      }));
 
   // Step 2: Extract Features & Badges for every slot
-  const slotAnalyses = grid.slots.map((slot) => {
+  const slotAnalyses = locatedSlots.map((slot) => {
     const analysis = analyzeSlotColors(
       ctx,
       slot.x,
@@ -1011,7 +1057,33 @@ export async function processScreenshot(
 
   // Step 3: Recognition Engine (Two-Step Precise / Pure Local 2D-DCT Hash / Cloud AI)
   let detectionConfidence = 0;
-  const warnings: string[] = [];
+  const warnings: string[] = [...localizationWarnings];
+  const minimumSimilarity =
+    options.sensitivity === "strict"
+      ? 0.9
+      : options.sensitivity === "relaxed"
+        ? 0.8
+        : 0.85;
+  const minimumMargin =
+    options.sensitivity === "strict"
+      ? 0.04
+      : options.sensitivity === "relaxed"
+        ? 0.015
+        : 0.02;
+  const availableHashes = new Set(
+    getPrecomputedCardHashes().map((item) => item.cardId),
+  );
+  const missingFeatures = CARDS_DATABASE.filter(
+    (card) => !availableHashes.has(card.id),
+  );
+  if (missingFeatures.length)
+    warnings.push(
+      `${missingFeatures.length} catalog cards lack offline image features (${[...new Set(missingFeatures.map((card) => card.pack))].join(", ")}). Select those cards manually.`,
+    );
+  if (regions.length)
+    warnings.push(
+      "Card quantities are not read by the local detector. Check every quantity badge before importing.",
+    );
   if (options.matchingMode === "sequential") {
     if (
       !options.targetPack ||
@@ -1031,7 +1103,8 @@ export async function processScreenshot(
   let apiTokensUsed = 0;
   let apiDurationMs = 0;
   let apiCached = false;
-  let apiEngine = "1vcian 2D-DCT 感知哈希 (3,545卡离线特征库)";
+  let apiEngine = "本地 RGB 感知哈希匹配";
+  if (regions.length) apiEngine = "本地卡牌定位 + RGB 图像匹配";
   let aiDetectedCards: Array<{
     slotIndex: number;
     cardNumber?: string;
@@ -1041,6 +1114,7 @@ export async function processScreenshot(
     confidence: number;
     box_2d?: [number, number, number, number];
     matchedCard?: PokemonCard | null;
+    needsReview?: boolean;
   }> | null = null;
 
   let recognizedNames: Array<{
@@ -1226,6 +1300,10 @@ export async function processScreenshot(
         matchMethod: "visual_hash",
         hammingDistance: 0,
         visualSimilarity: aiSlot.confidence ?? 0,
+        needsReview:
+          !!aiSlot.needsReview || (aiSlot.confidence ?? 0) < minimumSimilarity,
+        includeInImport:
+          !aiSlot.needsReview && (aiSlot.confidence ?? 0) >= minimumSimilarity,
       });
     }
   } else {
@@ -1234,6 +1312,9 @@ export async function processScreenshot(
 
     for (let i = 0; i < slotAnalyses.length; i++) {
       const { slot, analysis, energyBadge } = slotAnalyses[i];
+      const detectedCrop = slot.region
+        ? cropCardRegion(canvas, slot.region)
+        : undefined;
 
       // Create thumbnail preview
       const thumbCanvas = document.createElement("canvas");
@@ -1241,26 +1322,42 @@ export async function processScreenshot(
       thumbCanvas.height = 168;
       const thumbCtx = thumbCanvas.getContext("2d");
       if (thumbCtx) {
-        thumbCtx.drawImage(
-          canvas,
-          slot.x,
-          slot.y,
-          slot.w,
-          slot.h,
-          0,
-          0,
-          120,
-          168,
-        );
+        if (detectedCrop) thumbCtx.drawImage(detectedCrop, 0, 0, 120, 168);
+        else
+          thumbCtx.drawImage(
+            canvas,
+            slot.x,
+            slot.y,
+            slot.w,
+            slot.h,
+            0,
+            0,
+            120,
+            168,
+          );
       }
 
       // Compute 1vcian 2D-DCT RGB perceptual hash directly on the slot
-      const dctResult = computeCardDctHash(ctx, slot.x, slot.y, slot.w, slot.h);
-      const recognizedSlot = recognizedNames?.find((n) => n.slotIndex === i);
+      const dctResult = detectedCrop
+        ? computeCardDctHash(detectedCrop)
+        : computeCardDctHash(ctx, slot.x, slot.y, slot.w, slot.h);
+      const recognizedSlot = recognizedNames?.find((n) => {
+        if (!slot.region) return n.slotIndex === i;
+        const bounds = n.box_2d;
+        return (
+          Array.isArray(bounds) &&
+          bounds.length === 4 &&
+          bounds.every((value) => Number.isFinite(value)) &&
+          (slot.region.centerX / canvas.width) * 1000 >= bounds[1] &&
+          (slot.region.centerX / canvas.width) * 1000 <= bounds[3] &&
+          (slot.region.centerY / canvas.height) * 1000 >= bounds[0] &&
+          (slot.region.centerY / canvas.height) * 1000 <= bounds[2]
+        );
+      });
       const isSlotOwned =
         recognizedSlot?.isOwned !== undefined
           ? recognizedSlot.isOwned
-          : !dctResult.isGrayscale && analysis.isOwned;
+          : !dctResult.isGrayscale && (slot.region ? true : analysis.isOwned);
 
       // Two-Step Match:
       // Step 1: Filter candidates by Pokémon name (Traditional Chinese, English, etc.)
@@ -1281,6 +1378,8 @@ export async function processScreenshot(
               method: "sequential" as const,
               distance: 192,
               similarity: 0,
+              candidates: [],
+              margin: 0,
             }
           : nameIndex.matchTwoStepSlot(dctResult.hashBuf, {
               recognizedName: recognizedSlot?.name,
@@ -1295,7 +1394,8 @@ export async function processScreenshot(
       if (!matchedCard) continue;
       const slotOwned = isSlotOwned;
       const slotCount = isSlotOwned
-        ? recognizedSlot?.count || Math.max(1, analysis.estimatedCount)
+        ? recognizedSlot?.count ||
+          (slot.region ? 1 : Math.max(1, analysis.estimatedCount))
         : 0;
       const slotConfidence = match.confidencePct / 100;
 
@@ -1315,6 +1415,14 @@ export async function processScreenshot(
         matchMethod: match.method,
         hammingDistance: match.distance,
         visualSimilarity: match.similarity,
+        candidates: match.candidates,
+        needsReview:
+          match.similarity < minimumSimilarity ||
+          (match.margin ?? 1) < minimumMargin,
+        includeInImport:
+          match.method === "sequential" ||
+          (match.similarity >= minimumSimilarity &&
+            (match.margin ?? 1) >= minimumMargin),
       });
     }
   }
@@ -1452,6 +1560,7 @@ export async function processScreenshot(
     cached: apiCached,
     engine: apiEngine,
     warnings: [...new Set(warnings)],
+    localization: regions.length ? "model" : "grid",
     summary: {
       totalDetected: slots.length,
       ownedCount,
@@ -1658,6 +1767,7 @@ export function applyScanResultsToCollection(
 
   slots.forEach((slot) => {
     if (!slot.card) return;
+    if (slot.includeInImport === false) return;
     if (
       mode === "overwrite_pack" &&
       targetPack &&

@@ -25,6 +25,9 @@ test("scanner does not guess silhouette identity or invent a score for an unavai
   assert.equal(missing.card, null);
   assert.equal(missing.confidencePct, 0);
   const hash = getPrecomputedCardHashes()[0];
+  const ambiguous = matcher.matchTwoStepSlot(hash.hashBuf);
+  assert.equal(ambiguous.margin, 0);
+  assert.ok(ambiguous.candidates!.length > 1);
   const inverse = new Uint32Array([...hash.hashBuf].map((n) => ~n));
   const match = matcher.matchTwoStepSlot(inverse, {
     recognizedName: hash.card.nameEn,
@@ -110,6 +113,15 @@ test("partial screenshots preserve unseen inventory and clamp trade quantities o
     "merge",
   );
   assert.equal(merged[card.id].count, 9);
+  assert.deepEqual(
+    applyScanResultsToCollection(
+      collection,
+      [{ ...slot, includeInImport: false }],
+      "overwrite_pack",
+      "A1",
+    ),
+    collection,
+  );
   assert.deepEqual(
     applyScanResultsToCollection(collection, [], "overwrite_pack", "A1"),
     collection,

@@ -91,8 +91,8 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
   const [overrideStartNumber, setOverrideStartNumber] = useState<number | null>(null);
   const [overridePack, setOverridePack] = useState<string | null>(null);
 
-  // Recognition Engine Settings (Default: Two-Step Precise Name Match + 2D-DCT Variant Hash)
-  const [matchingMode, setMatchingMode] = useState<'two_step' | 'visual_hash' | 'hybrid' | 'sequential' | 'ai'>('two_step');
+  // Local detector + RGB hash avoids requiring an account or cloud OCR by default.
+  const [matchingMode, setMatchingMode] = useState<'two_step' | 'visual_hash' | 'hybrid' | 'sequential' | 'ai'>('visual_hash');
   const [matchingSensitivity, setMatchingSensitivity] = useState<'strict' | 'balanced' | 'relaxed'>('balanced');
 
   // Quick In-Slot Card Replacement Picker State
@@ -1023,11 +1023,13 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [selectedPack, startCardNumber]);
+  }, [selectedPack, startCardNumber, preferredCols, matchingMode, matchingSensitivity, isProcessing, currentLanguage, showToast]);
 
   // Process uploaded or pasted screenshot files with fast concurrency
   const handleProcessFiles = async (files: File[]) => {
+    if (isProcessing) return;
     if (files.length === 0) return;
+    if (files.length > 10) {showToast(currentLanguage==='zh-Hant'?'每次最多识别 10 张截图。':'Scan at most 10 screenshots at once.','error');return;}
     setIsProcessing(true);
 
     try {
@@ -1113,7 +1115,7 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
       : rowGapScale;
 
     const nextCols = params.cols !== undefined ? params.cols : preferredCols;
-    const nextPack = params.pack !== undefined ? params.pack : (overridePack || currentResult?.packCode || 'A1');
+    const nextPack = params.pack !== undefined ? params.pack : (overridePack || (currentResult?.packCode === 'ALL' ? 'AUTO' : currentResult?.packCode) || 'AUTO');
     const defaultStart = parseInt(cardSlots[0]?.card?.cardNumber, 10) || 1;
     const stepDelta = (currentResult?.detectedCols || 3);
     const nextStart = params.startCardNum !== undefined
@@ -1134,7 +1136,7 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
     try {
       const res = await processScreenshot(currentImg, {
         fileName: currentResult?.fileName || 'game_screenshot.png',
-        targetPack: nextPack,
+        targetPack: nextPack === 'AUTO' ? undefined : nextPack,
         startCardIndex: nextStart,
         preferredCols: nextCols,
         verticalShiftRatio: nextShift,
@@ -1144,6 +1146,7 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
         anchorPoint: params.anchorPoint,
         matchingMode: nextMode,
         sensitivity: nextSens,
+        localization: params.mode && params.mode !== 'sequential' ? 'auto' : 'grid',
       });
 
       setScanResults((prev) => {
@@ -1182,9 +1185,10 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
             ...slot,
             card: newCard,
             isModified: true,
-            confidence: 1.0,
-            visualSimilarity: 1.0,
-            hammingDistance: 0,
+            includeInImport: true,
+            needsReview: false,
+            visualSimilarity: slot.candidates?.find(candidate=>candidate.card.id===newCard.id)?.similarity,
+            hammingDistance: undefined,
             matchMethod: 'visual_hash',
           };
         }
@@ -1216,7 +1220,7 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
   // Remove a single screenshot from batch
   const handleRemoveResult = (index: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    const newResults = scanResults.filter((_, i) => i !== index);
+    const newResults = scanResults.map((result,i)=>i===activeResultIndex?{...result,slots:cardSlots}:result).filter((_, i) => i !== index);
     const newImages = currentSourceImages.filter((_, i) => i !== index);
     setScanResults(newResults);
     setCurrentSourceImages(newImages);
@@ -1310,7 +1314,7 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
       origin: { y: 0.6 },
     });
 
-    const ownedImported = allSlots.filter((s) => s.owned).length;
+    const ownedImported = allSlots.filter((s) => s.owned && s.includeInImport !== false).length;
     showToast(`🎉 成功导入！已同步 ${ownedImported} 张卡牌至图鉴`, 'success');
     onClose();
   };
@@ -1378,7 +1382,7 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
                     </span>
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-400 font-bold text-[11px]">
                       <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                      {labels.speedBadge}
+                      {currentLanguage==='zh-Hant'?'本地识别 · 结果与数量需核对':'Local recognition · review cards and quantities'}
                     </span>
                   </div>
 
@@ -1530,6 +1534,9 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
                     </div>
                   )}
                   {/* Results Summary Bar with Auto-Detected Pack Badge */}
+                  <p className="text-xs text-slate-400">{currentLanguage==='zh-Hant'
+                    ? `${currentResult?.localization==='model'?'卡牌自动定位':'网格定位'} · 候选结果可手动校正；本地识别不读取数量角标。`
+                    : `${currentResult?.localization==='model'?'Detected card regions':'Grid alignment'} · Review candidates; local recognition does not read quantity badges.`}</p>
                   <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
                       <div className="flex items-center gap-2">
@@ -1557,7 +1564,7 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
                       </div>
 
                       {/* Performance & Token Telemetry */}
-                      {currentResult?.tokensUsed !== undefined && (
+                      {!!currentResult?.tokensUsed && (
                         <div className="flex items-center gap-1.5 text-[11px] font-medium">
                           {currentResult.cached ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
@@ -1935,7 +1942,7 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
                               : 'text-slate-400 hover:text-white'
                           }`}
                         >
-                          {labels.twoStep}
+                          {currentLanguage==='zh-Hant'?'云端卡名 + 本地图像匹配':'Cloud names + local image matching'}
                         </button>
                         <button
                           type="button"
@@ -2084,6 +2091,10 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
                               : 'bg-slate-950/30 border-slate-800 hover:border-slate-700 opacity-85'
                           }`}
                         >
+                          <label className="flex gap-2 text-xs items-center text-slate-300">
+                            <input type="checkbox" checked={slot.includeInImport !== false} onChange={event=>setCardSlots(previous=>previous.map(item=>item.id===slot.id?{...item,includeInImport:event.target.checked}:item))} />
+                            {currentLanguage==='zh-Hant' ? (slot.needsReview?'待核对：勾选后才导入':'导入此卡') : (slot.needsReview?'Review required: select to import':'Include this card')}
+                          </label>
                           <div className="flex items-center justify-between gap-2.5">
                             <div className="flex items-center gap-2 flex-1 min-w-0">
                               {/* Visual Comparison: Cropped Screenshot Slice + Matched Card Thumbnail */}
@@ -2204,6 +2215,16 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
                           </div>
 
                           {/* Quick In-Slot Card Replacement Dropdown */}
+                          {!!slot.candidates?.length && (slot.needsReview || isEditing) && (
+                            <div className="flex flex-col gap-1 border-t border-slate-800 pt-2">
+                              <span className="text-xs text-amber-300">{currentLanguage==='zh-Hant'?'选择匹配候选':'Choose a candidate'}</span>
+                              {slot.candidates.slice(0,3).map(candidate=>(
+                                <button type="button" key={candidate.card.id} onClick={()=>handleReplaceCardInSlot(slot.id,candidate.card)} className="text-xs text-left p-2 rounded bg-slate-800 hover:bg-indigo-900 text-slate-200">
+                                  {candidate.card.id} · {getCardName(candidate.card)} · {Math.round(candidate.similarity*100)}%
+                                </button>
+                              ))}
+                            </div>
+                          )}
                           {isEditing && (
                             <div className="mt-1 pt-2 border-t border-slate-800 flex flex-col gap-1.5 bg-slate-900/90 p-2 rounded-lg">
                               <div className="flex items-center gap-1.5">
@@ -2256,7 +2277,7 @@ export const DexScannerModal: React.FC<DexScannerModalProps> = ({
                       const decreasing=changed.filter(id=>(preview[id]?.count || 0)<(userCollection[id]?.count || 0)).length;
                       return <p>{currentLanguage==='zh-Hant'?`将变更 ${changed.length} 条卡牌数量，其中 ${decreasing} 条数量减少。`:`Updates ${changed.length} card counts; ${decreasing} counts decrease.`}</p>;
                     })()}
-                    <p>{currentLanguage==='zh-Hant'?'识别分数不是实测准确率。无法定位的异画卡会被跳过；请逐张核对卡号、卡包和数量，尤其是低分结果。':'Recognition scores are estimates, not measured accuracy. Unresolved variants are skipped. Review card IDs, sets, and quantities, especially low-score results.'}</p>
+                    <p>{currentLanguage==='zh-Hant'?'识别分数不是实测准确率。低分或候选接近的结果默认不导入，请逐张校正并勾选。数量角标需要人工核对。':'Scores are not measured accuracy. Low scores and close candidates are excluded until you review and select them. Check every quantity badge.'}</p>
                     <label className="flex gap-2"><input type="checkbox" checked={reviewedImport} onChange={e=>setReviewedImport(e.target.checked)} />{currentLanguage==='zh-Hant'?'我已核对全部截图，确认导入结果':'I reviewed all screenshots and approve these import results'}</label>
                   </div>
                   <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4">
